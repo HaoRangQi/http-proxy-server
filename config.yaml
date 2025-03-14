@@ -1,0 +1,105 @@
+# 代理服务器配置
+proxy:
+  host: 127.0.0.1  # 代理服务器监听地址
+  port: 6000       # 代理服务器监听端口
+
+# 日志配置
+logging:
+  level: INFO      # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  file: proxy.log  # 日志文件路径
+
+# 证书配置
+certificates:
+  dir: certs                # 证书存储目录
+  name_prefix: "proxy_"     # 证书文件名前缀，用于区分不同应用的证书
+
+# 请求记录配置
+recording:
+  enabled: false   # 是否记录所有请求和响应内容
+  dir: logs        # 记录文件存储目录
+
+# 请求头处理配置
+header_extraction:
+  - name: "API认证提取"                              # 规则名称
+    url_pattern: "https://api.example.com/completion" # 要监控的URL模式
+    extract_header: "Authorization"                   # 要提取的HTTP请求头
+    output_file: "auth/api_tokens.txt"                # 提取内容保存路径
+    refresh_interval: 30                              # 刷新间隔（分钟），超过此时间才会更新文件
+    verbose_logging: false                            # 是否打印详细日志，设为true会显示完整请求内容
+
+# 上游代理配置
+upstream_proxy:
+  enabled: true         # 是否使用上游代理
+  host: 127.0.0.1       # 上游代理地址（如Clash）
+  port: 7890            # 上游代理端口
+
+# 实时配置更新
+realtime_config:
+  enabled: true         # 是否启用实时配置更新（无需重启服务器）
+  check_interval: 10    # 检查配置文件变更的间隔（秒）
+
+# 全局配置
+global:
+  timeout: 30s
+  max_retries: 3
+  
+# 请求处理规则
+request_rules:
+  - name: "特殊头部处理规则1"
+    match:
+      type: "exact"  # 匹配类型: exact, prefix, suffix, regex
+      path: "/api/special"
+    headers:
+      add:
+        - name: "X-Custom-Header"
+          value: "custom-value"
+      modify:
+        - name: "Authorization"
+          pattern: "Bearer (.+)"  # 正则表达式
+          replacement: "Token $1"
+      remove:
+        - "X-Unused-Header"
+  
+  - name: "用户代理修改规则"
+    match:
+      type: "prefix"
+      path: "/user/"
+    headers:
+      modify:
+        - name: "User-Agent"
+          pattern: "OldClient/.*"
+          replacement: "NewClient/1.0"
+  
+  - name: "正则路径匹配示例"
+    match:
+      type: "regex"
+      path: "/items/[0-9]+"
+    headers:
+      add:
+        - name: "Cache-Control"
+          value: "max-age=3600"
+
+# 响应处理规则
+response_rules:
+  - name: "响应头处理"
+    match:
+      type: "suffix"
+      path: ".json"
+    headers:
+      add:
+        - name: "Content-Type"
+          value: "application/json; charset=utf-8"
+    
+  - name: "响应体处理"
+    match:
+      type: "regex"
+      path: "/api/v[0-9]+/data"
+    body:
+      transformations:
+        - type: "replace"
+          pattern: "sensitive_data"
+          replacement: "***"
+        - type: "json_path"
+          path: "$.results[*].timestamp"
+          action: "format_date"
+          format: "ISO8601"
