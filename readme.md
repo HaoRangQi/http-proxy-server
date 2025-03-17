@@ -96,6 +96,21 @@ header_extraction:
     output_file: "auth/api_tokens.txt"                 # 提取内容保存路径
     refresh_interval: 30                               # 刷新间隔（分钟）
     verbose_logging: false                             # 是否打印详细日志
+    # 本地文件存储配置
+    local_storage:
+      enabled: true                                    # 是否保存到本地文件
+    # 远程接口配置
+    remote_push:
+      enabled: true                                    # 是否启用远程推送功能（全局开关）
+      endpoints:                                       # 远程接口端点列表
+        - name: "主要接口"                              # 接口名称
+          enabled: true                                # 是否启用此接口
+          url: "http://your-server:3000/admin/update-tokens"  # 接口URL
+          method: "POST"                               # 请求方法
+          headers:                                     # 请求头
+            Content-Type: "application/json"
+            X-Admin-Key: "your-admin-key"
+          data_format: '{"tokens": ["$TOKEN"]}'        # 数据格式，$TOKEN将被替换为实际令牌值
 ```
 
 ### 上游代理配置
@@ -126,6 +141,26 @@ realtime_config:
 ## 提取的令牌
 
 从特定URL提取的授权令牌会保存在配置的`output_file`路径中。程序会根据配置的刷新间隔自动更新此文件。
+
+### 远程接口推送
+
+除了保存到本地文件，程序还支持将提取的令牌推送到远程接口：
+
+1. **本地存储控制**：通过`local_storage.enabled`配置是否保存到本地文件
+2. **远程推送控制**：
+   - `remote_push.enabled`：全局开关，控制是否启用远程推送功能
+   - 每个接口都有单独的`enabled`开关，可以精细控制哪些接口接收令牌
+3. **多接口支持**：可以配置多个远程接口，每个接口可以有不同的URL、请求方法、请求头和数据格式
+4. **数据格式自定义**：通过`data_format`配置发送的数据格式，使用`$TOKEN`占位符表示提取的令牌
+
+示例接口请求：
+
+```bash
+curl -X POST http://your-server:3000/admin/update-tokens \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Key: your-admin-key" \
+  -d '{"tokens": ["sk-extracted-token-value"]}'
+```
 
 ## 故障排除
 

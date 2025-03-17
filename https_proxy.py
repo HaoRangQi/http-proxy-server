@@ -29,6 +29,7 @@ from OpenSSL import crypto
 from pathlib import Path
 import time
 import copy
+import requests
 
 # 默认配置
 # 如果配置文件不存在，将使用这些默认值
@@ -56,7 +57,26 @@ DEFAULT_CONFIG = {
             "extract_header": "Authorization",                    # 要提取的请求头
             "output_file": "auth/api_tokens.txt",                 # 提取内容保存路径
             "refresh_interval": 30,                               # 刷新间隔（分钟）
-            "verbose_logging": False                              # 是否打印详细日志
+            "verbose_logging": False,                             # 是否打印详细日志
+            "local_storage": {                                    # 本地文件存储配置
+                "enabled": True                                   # 是否保存到本地文件
+            },
+            "remote_push": {                                      # 远程接口推送配置
+                "enabled": False,                                 # 是否启用远程推送功能（全局开关）
+                "endpoints": [                                    # 远程接口端点列表
+                    {
+                        "name": "主要接口",                        # 接口名称
+                        "enabled": True,                          # 是否启用此接口
+                        "url": "http://your-server:3000/admin/update-tokens",  # 接口URL
+                        "method": "POST",                         # 请求方法
+                        "headers": {                              # 请求头
+                            "Content-Type": "application/json",
+                            "X-Admin-Key": "your-admin-key"
+                        },
+                        "data_format": '{"tokens": ["$TOKEN"]}'   # 数据格式，$TOKEN将被替换为实际令牌值
+                    }
+                ]
+            }
         }
     ],
     "upstream_proxy": {
@@ -302,7 +322,8 @@ def process_special_urls(host, direction, decoded_data, raw_data, config):
         config: 配置字典
     """
     try:
-        for special_name, special_config in config["header_extraction"]:
+        for rule in config["header_extraction"]:
+            special_config = rule
             url_pattern = special_config["url_pattern"]
             url_host = url_pattern.split("//")[1].split("/")[0]  # 提取主机部分
             verbose_logging = special_config.get("verbose_logging", False)  # 获取日志详细程度设置
@@ -333,48 +354,113 @@ def process_special_urls(host, direction, decoded_data, raw_data, config):
                     else:
                         logger.debug(f"找到 {header_name}")
                     
-                    # 检查是否需要更新文件
-                    should_update = True
-                    if refresh_interval > 0 and os.path.exists(output_file):
-                        file_mtime = os.path.getmtime(output_file)
-                        current_time = time.time()
-                        
-                        # 计算文件存在的时间（分钟）
-                        time_diff_minutes = (current_time - file_mtime) / 60
-                        
-                        if verbose_logging:
-                            logger.info(f"文件上次修改时间: {datetime.datetime.fromtimestamp(file_mtime)}")
-                            logger.info(f"当前时间: {datetime.datetime.fromtimestamp(current_time)}")
-                            logger.info(f"文件已存在时间: {time_diff_minutes:.2f}分钟，刷新间隔: {refresh_interval}分钟")
-                        
-                        # 如果文件修改时间在刷新间隔内，则不更新
-                        if time_diff_minutes < refresh_interval:
-                            if verbose_logging:
-                                logger.info(f"文件 {output_file} 在刷新间隔内，跳过更新")
-                            should_update = False
-                        else:
-                            if verbose_logging:
-                                logger.info(f"文件 {output_file} 已超过刷新间隔，将更新")
-                    else:
-                        if not os.path.exists(output_file):
-                            if verbose_logging:
-                                logger.info(f"文件 {output_file} 不存在，将创建")
-                        elif refresh_interval <= 0:
-                            if verbose_logging:
-                                logger.info(f"刷新间隔设置为 {refresh_interval}，将始终更新")
+                    # 获取本地存储配置
+                    local_storage_config = special_config.get("local_storage", {"enabled": True})
+                    local_storage_enabled = local_storage_config.get("enabled", True)
                     
-                    if should_update:
-                        # 确保输出目录存在
-                        os.makedirs(os.path.dirname(output_file), exist_ok=True)
-                        
-                        # 写入提取的值
-                        with open(output_file, 'w', encoding='utf-8') as f:
-                            f.write(header_value)
-                        
-                        if verbose_logging:
-                            logger.info(f"已提取 {header_name} 并保存到 {output_file}")
+                    # 获取远程推送配置
+                    remote_push_config = special_config.get("remote_push", {"enabled": False})
+                    remote_push_enabled = remote_push_config.get("enabled", False)
+                    
+                    # 处理本地文件保存
+                    if local_storage_enabled:
+                        # 检查是否需要更新文件
+                        should_update = True
+                        if refresh_interval > 0 and os.path.exists(output_file):
+                            file_mtime = os.path.getmtime(output_file)
+                            current_time = time.time()
+                            
+                            # 计算文件存在的时间（分钟）
+                            time_diff_minutes = (current_time - file_mtime) / 60
+                            
+                            if verbose_logging:
+                                logger.info(f"文件上次修改时间: {datetime.datetime.fromtimestamp(file_mtime)}")
+                                logger.info(f"当前时间: {datetime.datetime.fromtimestamp(current_time)}")
+                                logger.info(f"文件已存在时间: {time_diff_minutes:.2f}分钟，刷新间隔: {refresh_interval}分钟")
+                            
+                            # 如果文件修改时间在刷新间隔内，则不更新
+                            if time_diff_minutes < refresh_interval:
+                                if verbose_logging:
+                                    logger.info(f"文件 {output_file} 在刷新间隔内，跳过更新")
+                                should_update = False
+                            else:
+                                if verbose_logging:
+                                    logger.info(f"文件 {output_file} 已超过刷新间隔，将更新")
                         else:
-                            logger.debug(f"已更新 {output_file}")
+                            if not os.path.exists(output_file):
+                                if verbose_logging:
+                                    logger.info(f"文件 {output_file} 不存在，将创建")
+                            elif refresh_interval <= 0:
+                                if verbose_logging:
+                                    logger.info(f"刷新间隔设置为 {refresh_interval}，将始终更新")
+                        
+                        if should_update:
+                            # 确保输出目录存在
+                            os.makedirs(os.path.dirname(output_file), exist_ok=True)
+                            
+                            # 写入提取的值
+                            with open(output_file, 'w', encoding='utf-8') as f:
+                                f.write(header_value)
+                            
+                            if verbose_logging:
+                                logger.info(f"已提取 {header_name} 并保存到 {output_file}")
+                            else:
+                                logger.debug(f"已更新 {output_file}")
+                    elif verbose_logging:
+                        logger.info("本地文件存储已禁用，跳过保存到文件")
+                    
+                    # 处理远程推送
+                    if remote_push_enabled:
+                        endpoints = remote_push_config.get("endpoints", [])
+                        active_endpoints = [ep for ep in endpoints if ep.get("enabled", True)]
+                        
+                        if active_endpoints:
+                            if verbose_logging:
+                                logger.info(f"开始推送到 {len(active_endpoints)} 个已启用的远程接口")
+                            
+                            for endpoint in active_endpoints:
+                                try:
+                                    endpoint_name = endpoint.get("name", "未命名接口")
+                                    url = endpoint.get("url")
+                                    method = endpoint.get("method", "POST")
+                                    headers = endpoint.get("headers", {})
+                                    data_format = endpoint.get("data_format", '{"token": "$TOKEN"}')
+                                    
+                                    # 替换数据格式中的令牌占位符
+                                    data_str = data_format.replace("$TOKEN", header_value)
+                                    data = json.loads(data_str)
+                                    
+                                    if verbose_logging:
+                                        logger.info(f"推送到接口 '{endpoint_name}': {url}")
+                                        logger.info(f"请求方法: {method}")
+                                        logger.info(f"请求头: {headers}")
+                                        logger.info(f"请求数据: {json.dumps(data)[:100]}...")
+                                    
+                                    # 发送请求
+                                    response = requests.request(
+                                        method=method,
+                                        url=url,
+                                        headers=headers,
+                                        json=data,
+                                        timeout=10  # 设置超时时间
+                                    )
+                                    
+                                    if response.status_code >= 200 and response.status_code < 300:
+                                        if verbose_logging:
+                                            logger.info(f"推送到 '{endpoint_name}' 成功: 状态码 {response.status_code}")
+                                            logger.info(f"响应内容: {response.text[:100]}...")
+                                        else:
+                                            logger.debug(f"推送到 '{endpoint_name}' ({url}) 成功: 状态码 {response.status_code}")
+                                    else:
+                                        logger.warning(f"推送到 '{endpoint_name}' ({url}) 失败: 状态码 {response.status_code}")
+                                        if verbose_logging:
+                                            logger.warning(f"错误响应: {response.text[:200]}...")
+                                except Exception as e:
+                                    logger.error(f"推送到接口 '{endpoint.get('name', '未命名接口')}' ({endpoint.get('url')}) 时出错: {e}")
+                        else:
+                            logger.warning("启用了远程推送但所有端点都被禁用")
+                    elif verbose_logging:
+                        logger.info("远程推送功能已禁用")
                     
                 # 再次使用分隔符结束
                 if verbose_logging:
