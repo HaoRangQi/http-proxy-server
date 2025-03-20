@@ -231,8 +231,8 @@ def view_tokens():
             token = f.read().strip()
         
         if token:
-            # 只显示令牌的一部分，保护敏感信息
-            print(f"API令牌: {token[:10]}...{token[-5:] if len(token) > 15 else ''}")
+            # 显示完整令牌
+            print(f"API令牌: {token}")
             print(f"令牌长度: {len(token)}字符")
             print(f"最后更新时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(os.path.getmtime(token_file)))}")
         else:
@@ -253,6 +253,37 @@ def delete_token():
         print(f"令牌文件已成功删除: {token_file}")
     except Exception as e:
         print(f"删除令牌文件失败: {e}")
+
+
+def monitor_log_realtime():
+    """实时监控日志文件"""
+    if not os.path.exists(LOG_FILE):
+        print(f"日志文件不存在: {LOG_FILE}")
+        return
+    
+    print(f"\n=== 实时监控日志 (按Ctrl+C退出) ===")
+    print(f"监控文件: {LOG_FILE}")
+    print("正在等待新日志...")
+    
+    # 获取文件当前大小
+    file_size = os.path.getsize(LOG_FILE)
+    
+    try:
+        with open(LOG_FILE, 'r', encoding='utf-8', errors='replace') as f:
+            # 移动到文件末尾
+            f.seek(file_size)
+            
+            while True:
+                line = f.readline()
+                if line:
+                    print(line.strip())
+                else:
+                    # 没有新行，等待一小段时间
+                    time.sleep(0.1)
+    except KeyboardInterrupt:
+        print("\n停止监控日志")
+    except Exception as e:
+        print(f"监控日志时出错: {e}")
 
 
 def show_menu():
@@ -281,9 +312,10 @@ def show_menu():
         print("5. 查看服务器日志")
         print("6. 查看API令牌")
         print("7. 删除API令牌")
+        print("8. 实时监控日志")
         print("0. 退出")
         
-        choice = input("\n请选择操作 [0-7]: ")
+        choice = input("\n请选择操作 [0-8]: ")
         
         if choice == '1':
             start_server()
@@ -309,11 +341,11 @@ def show_menu():
             view_tokens()
             input("\n按Enter继续...")
         elif choice == '7':
-            confirm = input("确定要删除API令牌文件吗？(y/n): ")
-            if confirm.lower() == 'y':
-                delete_token()
-            else:
-                print("已取消删除操作")
+            delete_token()
+            input("\n按Enter继续...")
+        elif choice == '8':
+            print("启动实时日志监控，按Ctrl+C退出监控...")
+            monitor_log_realtime()
             input("\n按Enter继续...")
         elif choice == '0':
             print("退出程序...")
@@ -328,8 +360,8 @@ def main():
     # 检查是否有命令行参数
     if len(sys.argv) > 1:
         parser = argparse.ArgumentParser(description='HTTP代理服务器管理工具')
-        parser.add_argument('action', choices=['start', 'stop', 'restart', 'status', 'log', 'menu'],
-                            help='执行的操作: start=启动, stop=停止, restart=重启, status=状态, log=查看日志, menu=交互菜单')
+        parser.add_argument('action', choices=['start', 'stop', 'restart', 'status', 'log', 'monitor', 'token', 'menu'],
+                            help='执行的操作: start=启动, stop=停止, restart=重启, status=状态, log=查看日志, monitor=实时监控日志, token=查看令牌, menu=交互菜单')
         parser.add_argument('--lines', type=int, default=10,
                             help='显示日志的行数 (默认: 10)')
         
@@ -346,6 +378,10 @@ def main():
             server_status()
         elif args.action == 'log':
             tail_log(args.lines)
+        elif args.action == 'monitor':
+            monitor_log_realtime()
+        elif args.action == 'token':
+            view_tokens()
         elif args.action == 'menu':
             show_menu()
     else:
